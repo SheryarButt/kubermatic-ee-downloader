@@ -15,32 +15,42 @@ limitations under the License.
 */
 package tools
 
-import "sort"
+import (
+	_ "embed"
+	"sort"
+
+	"gopkg.in/yaml.v3"
+)
 
 // Tool describes a downloadable Kubermatic enterprise binary.
 type Tool struct {
-	Description string
+	Description string `yaml:"description"`
 	// Registry is the default OCI registry reference for this tool.
 	// Can be overridden with --registry on the get command.
-	Registry string
+	Registry string `yaml:"registry"`
 	// BinaryName is the filename written to the output directory.
-	BinaryName string
+	BinaryName string `yaml:"binary_name"`
 	// Tag is the default tag to pull if none is specified in the registry reference.
 	// Optional, defaults to "latest".
-	Tag []string
+	Tag []string `yaml:"tags"`
+	// Architectures lists the supported CPU architectures. Optional, defaults to "amd64".
+	Architectures []string `yaml:"architectures"`
+	// OS lists the supported operating systems. Optional, defaults to "linux".
+	OS []string `yaml:"os"`
 }
 
+//go:embed tools.yaml
+var toolsYAML []byte
+
 // KnownTools is the central registry of all downloadable enterprise tools.
-// Add new tools here as they are published.
-var KnownTools = map[string]Tool{
-	"conformance-tester": {
-		Description: "Kubermatic conformance cli",
-		// Registry:    "quay.io/kubermatic/conformance-ee",
-		Registry:   "docker.io/soer3n/edge-router",
-		BinaryName: "conformance-tester",
-		Tag:        []string{"latest"},
-	},
-}
+// Add new tools to internal/tools/tools.yaml.
+var KnownTools = func() map[string]Tool {
+	var m map[string]Tool
+	if err := yaml.Unmarshal(toolsYAML, &m); err != nil {
+		panic("tools: failed to parse tools.yaml: " + err.Error())
+	}
+	return m
+}()
 
 // Names returns the sorted list of known tool names.
 func Names() []string {

@@ -19,6 +19,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 
@@ -57,16 +58,16 @@ func main() {
 		Short: "List available tools",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-			fmt.Fprintln(w, "TOOL\tIMAGE\tTAG\tDESCRIPTION")
+			fmt.Fprintln(w, "TOOL\tVERSIONS\tOS\tARCH\tDESCRIPTION")
 			for _, name := range tools.Names() {
 				t := tools.KnownTools[name]
-				tags := t.Tag
-				if len(tags) == 0 {
-					tags = []string{"latest"}
-				}
-				for _, tg := range tags {
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, t.Registry, tg, t.Description)
-				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+					name,
+					strings.Join(t.Tag, ", "),
+					strings.Join(t.OS, ", "),
+					strings.Join(t.Architectures, ", "),
+					t.Description,
+				)
 			}
 			return w.Flush()
 		},
@@ -74,7 +75,9 @@ func main() {
 
 	// --- get command ---
 	var (
-		tag        string
+		version    string
+		arch       string
+		goos       string
 		registry   string
 		outputPath string
 	)
@@ -86,13 +89,14 @@ func main() {
 
 Credentials are resolved in order: CLI flags, ~/.docker/config.json, interactive prompt.
 
-If --tag is not specified, the tool's default tag is used. Available tools and
-their tags can be listed with: kubermatic-downloader list
+If --version is not specified, the tool's first listed version is used. Available
+tools and their versions can be listed with: kubermatic-ee-downloader list
 
 Examples:
-  kubermatic-downloader get conformance-tester
-  kubermatic-downloader get conformance-tester --tag v1.2.0 --output /usr/local/bin
-  kubermatic-downloader get conformance-tester --username user --password pass`,
+  kubermatic-ee-downloader get conformance-tester
+  kubermatic-ee-downloader get conformance-tester --version v1.2.0 --output /usr/local/bin
+  kubermatic-ee-downloader get conformance-tester --os linux --arch amd64
+  kubermatic-ee-downloader get conformance-tester --username user --password pass`,
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: tools.Names(),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -101,19 +105,26 @@ Examples:
 			toolName := args[0]
 			tool, ok := tools.KnownTools[toolName]
 			if !ok {
-				return fmt.Errorf("unknown tool %q — run 'kubermatic-downloader list' to see available tools", toolName)
+				return fmt.Errorf("unknown tool %q — run 'kubermatic-ee-downloader list' to see available tools", toolName)
 			}
 
 			if registry == "" {
 				registry = tool.Registry
 			}
 
-			if tag == "" {
+			if version == "" {
 				if len(tool.Tag) > 0 {
-					tag = tool.Tag[0]
+					version = tool.Tag[0]
 				} else {
-					tag = "latest"
+					version = "latest"
 				}
+			}
+
+			if arch != "" && !contains(tool.Architectures, arch) {
+				return fmt.Errorf("unsupported arch %q for %q — supported: %s", arch, toolName, strings.Join(tool.Architectures, ", "))
+			}
+			if goos != "" && !contains(tool.OS, goos) {
+				return fmt.Errorf("unsupported os %q for %q — supported: %s", goos, toolName, strings.Join(tool.OS, ", "))
 			}
 
 			if err := handleAuth(log, registry, &username, &password); err != nil {
@@ -122,26 +133,44 @@ Examples:
 
 			log.WithFields(logrus.Fields{
 				"tool":     toolName,
-				"tag":      tag,
+				"version":  version,
+				"os":       goos,
+				"arch":     arch,
 				"registry": registry,
 				"output":   outputPath,
 			}).Info("Downloading tool")
 
+			outputName := fmt.Sprintf("%s_%s-%s_%s", tool.BinaryName, version, goos, arch)
+			tag := fmt.Sprintf("%s-%s_%s", version, goos, arch)
+
 			data, err := downloader.PullFromRegistry(cmd.Context(), log, registry, tag, tool.BinaryName, username, password)
 			if err != nil {
-				return fmt.Errorf("pull failed: %w", err)
+				if !isUnauthorized(err) {
+					return fmt.Errorf("pull failed: %w", err)
+				}
+				log.Warn("Authentication failed, please enter credentials")
+				username, password = "", ""
+				if err := promptCredentials(&username, &password); err != nil {
+					return err
+				}
+				data, err = downloader.PullFromRegistry(cmd.Context(), log, registry, tag, tool.BinaryName, username, password)
+				if err != nil {
+					return fmt.Errorf("pull failed: %w", err)
+				}
 			}
 
-			if err := downloader.Save(data, outputPath, tool.BinaryName); err != nil {
+			if err := downloader.Save(data, outputPath, outputName); err != nil {
 				return fmt.Errorf("save failed: %w", err)
 			}
 
-			log.WithField("path", outputPath+"/"+tool.BinaryName).Info("Download complete")
+			log.WithField("path", outputPath+"/"+outputName).Info("Download complete")
 			return nil
 		},
 	}
 
-	getCmd.Flags().StringVarP(&tag, "tag", "t", "", "Artifact tag (default: tool-specific or \"latest\")")
+	getCmd.Flags().StringVarP(&version, "version", "V", "", "Tool version (default: tool-specific or \"latest\")")
+	getCmd.Flags().StringVar(&arch, "arch", currentArch(), "Target architecture (e.g. amd64, arm64)")
+	getCmd.Flags().StringVar(&goos, "os", currentOS(), "Target operating system (e.g. linux, darwin, windows)")
 	getCmd.Flags().StringVarP(&registry, "registry", "r", "", "Override OCI registry (default: tool's registry)")
 	getCmd.Flags().StringVarP(&outputPath, "output", "o", ".", "Output directory")
 
@@ -150,6 +179,15 @@ Examples:
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func contains(slice []string, val string) bool {
+	for _, s := range slice {
+		if s == val {
+			return true
+		}
+	}
+	return false
 }
 
 func handleAuth(log *logrus.Logger, registry string, username, password *string) error {
@@ -197,6 +235,42 @@ func handleAuth(log *logrus.Logger, registry string, username, password *string)
 		return fmt.Errorf("username and password are required")
 	}
 	return nil
+}
+
+func isUnauthorized(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "401") || strings.Contains(msg, "unauthorized")
+}
+
+func promptCredentials(username, password *string) error {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Username: ")
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read username: %w", err)
+	}
+	*username = strings.TrimSpace(input)
+
+	fmt.Print("Password: ")
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
+	if err != nil {
+		return fmt.Errorf("failed to read password: %w", err)
+	}
+	fmt.Println()
+	*password = strings.TrimSpace(string(b))
+
+	if *username == "" || *password == "" {
+		return fmt.Errorf("username and password are required")
+	}
+	return nil
+}
+
+func currentOS() string {
+	return runtime.GOOS
+}
+
+func currentArch() string {
+	return runtime.GOARCH
 }
 
 func newLogger(verbose bool) *logrus.Logger {
