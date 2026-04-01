@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
 	"text/tabwriter"
 
 	"github.com/sirupsen/logrus"
@@ -151,7 +150,7 @@ func handleAuth(log *logrus.Logger, username, password *string) error {
 	}
 	if *password == "" {
 		fmt.Print("Password: ")
-		b, err := term.ReadPassword(syscall.Stdin)
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
 			return fmt.Errorf("failed to read password: %w", err)
 		}
