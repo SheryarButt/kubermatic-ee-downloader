@@ -1,0 +1,13 @@
+conformance-tester:
+  description: "Kubermatic conformance cli"
+  registry: "quay.io/kubermatic/conformance-ee"
+  binary_name: "conformance-tester"
+  tags:
+    - latest-cli
+  architectures:
+    - amd64
+    - arm64
+  os:
+    - linux
+    - darwin
+    - windows
