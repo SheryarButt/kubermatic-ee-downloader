@@ -75,6 +75,8 @@ The downloaded binary is named `{tool}_{version}-{os}_{arch}`, for example:
 | `--username` | `-u` | Registry username |
 | `--password` | `-p` | Registry password |
 | `--verbose` | `-v` | Enable verbose logging |
+| `--catalog-url` | | URL of the tools catalog YAML (defaults to the catalog on this repository's `main` branch) |
+| `--catalog-file` | | Path to a local tools catalog YAML, instead of fetching `--catalog-url` |
 
 #### `get` command
 
@@ -88,7 +90,7 @@ The downloaded binary is named `{tool}_{version}-{os}_{arch}`, for example:
 
 ## Adding Tools
 
-Tools are defined in [`internal/tools/tools.yaml`](internal/tools/tools.yaml) and embedded into the binary at build time. To add a new tool, append an entry and rebuild:
+Tools are defined in [`internal/tools/tools.yaml`](internal/tools/tools.yaml), which is fetched at runtime from the `main` branch of this repository. To add a new tool, append an entry and open a pull request:
 
 ```yaml
 my-tool:
@@ -117,6 +119,22 @@ my-tool:
 | `os` | Supported operating systems |
 
 The tag pulled from the registry is constructed as `{tag}-{os}_{arch}`, e.g. `latest-cli-linux_amd64`.
+
+### Using a Custom Catalog
+
+Both commands accept an alternative catalog, which is useful for testing an entry before it is merged, or for running fully offline:
+
+```bash
+# Local file
+kubermatic-ee-downloader list --catalog-file internal/tools/tools.yaml
+kubermatic-ee-downloader get my-tool --catalog-file ./my-catalog.yaml
+
+# Alternative URL (e.g. a branch or fork)
+kubermatic-ee-downloader list \
+  --catalog-url https://raw.githubusercontent.com/my-org/kubermatic-ee-downloader/my-branch/internal/tools/tools.yaml
+```
+
+`--catalog-file` and `--catalog-url` are mutually exclusive.
 
 ## Development
 

@@ -37,10 +37,11 @@ var version = "dev"
 
 func main() {
 	var (
-		username   string
-		password   string
-		verbose    bool
-		catalogURL string
+		username    string
+		password    string
+		verbose     bool
+		catalogURL  string
+		catalogFile string
 	)
 
 	rootCmd := &cobra.Command{
@@ -50,10 +51,20 @@ func main() {
 		SilenceUsage: true,
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
 			log := newLogger(verbose)
-			log.WithField("url", catalogURL).Debug("Fetching tool catalog")
-			catalog, err := tools.FetchCatalog(catalogURL, 5*time.Second)
+
+			var (
+				catalog map[string]tools.Tool
+				err     error
+			)
+			if catalogFile != "" {
+				log.WithField("file", catalogFile).Debug("Loading tool catalog from file")
+				catalog, err = tools.LoadCatalogFile(catalogFile)
+			} else {
+				log.WithField("url", catalogURL).Debug("Fetching tool catalog")
+				catalog, err = tools.FetchCatalog(catalogURL, 5*time.Second)
+			}
 			if err != nil {
-				return fmt.Errorf("load tool catalog: %w (use --catalog-url to specify an alternative)", err)
+				return fmt.Errorf("load tool catalog: %w (use --catalog-url or --catalog-file to specify an alternative)", err)
 			}
 			tools.KnownTools = catalog
 			return nil
@@ -64,6 +75,8 @@ func main() {
 	rootCmd.PersistentFlags().StringVarP(&password, "password", "p", "", "Registry password")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	rootCmd.PersistentFlags().StringVar(&catalogURL, "catalog-url", tools.DefaultCatalogURL, "URL of the tools catalog YAML")
+	rootCmd.PersistentFlags().StringVar(&catalogFile, "catalog-file", "", "Path to a local tools catalog YAML, instead of fetching --catalog-url")
+	rootCmd.MarkFlagsMutuallyExclusive("catalog-url", "catalog-file")
 
 	// --- list command ---
 	listCmd := &cobra.Command{

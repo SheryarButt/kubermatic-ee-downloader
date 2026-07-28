@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -141,6 +142,58 @@ test-tool:
 	}
 	if tool.BinaryName != "test-tool" {
 		t.Errorf("BinaryName = %q, want %q", tool.BinaryName, "test-tool")
+	}
+}
+
+func TestFetchCatalogEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("---\n"))
+	}))
+	defer srv.Close()
+
+	_, err := FetchCatalog(srv.URL, 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error for empty catalog")
+	}
+}
+
+func TestLoadCatalogFileSuccess(t *testing.T) {
+	catalog, err := LoadCatalogFile("tools.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := catalog["conformance-tester"]; !ok {
+		t.Error("expected conformance-tester in catalog")
+	}
+}
+
+func TestLoadCatalogFileErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	invalid := filepath.Join(dir, "invalid.yaml")
+	if err := os.WriteFile(invalid, []byte("not: valid: yaml: ["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(dir, "empty.yaml")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "missing file", path: filepath.Join(dir, "does-not-exist.yaml")},
+		{name: "invalid YAML", path: invalid},
+		{name: "empty file", path: empty},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := LoadCatalogFile(tt.path); err == nil {
+				t.Fatalf("expected error for %s", tt.name)
+			}
+		})
 	}
 }
 
