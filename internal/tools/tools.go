@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"time"
 
@@ -69,9 +70,26 @@ func FetchCatalog(url string, timeout time.Duration) (map[string]Tool, error) {
 		return nil, fmt.Errorf("reading catalog response: %w", err)
 	}
 
+	return parseCatalog(body)
+}
+
+// LoadCatalogFile reads and parses a tools catalog from a local file.
+func LoadCatalogFile(path string) (map[string]Tool, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading catalog file: %w", err)
+	}
+
+	return parseCatalog(body)
+}
+
+func parseCatalog(body []byte) (map[string]Tool, error) {
 	var m map[string]Tool
 	if err := yaml.Unmarshal(body, &m); err != nil {
 		return nil, fmt.Errorf("parsing catalog YAML: %w", err)
+	}
+	if len(m) == 0 {
+		return nil, fmt.Errorf("catalog contains no tools")
 	}
 
 	return m, nil
